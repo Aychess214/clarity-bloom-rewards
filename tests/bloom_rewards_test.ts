@@ -17,7 +17,7 @@ Clarinet.test({
       Tx.contractCall('bloom_rewards', 'register-partner', [
         types.principal(partner.address),
         types.ascii("Eco Store"),
-        types.uint(100)
+        types.uint(5)
       ], deployer.address)
     ]);
     
@@ -32,7 +32,7 @@ Clarinet.test({
     
     const partnerInfo = infoBlock.receipts[0].result.expectOk().expectSome();
     assertEquals(partnerInfo.name, "Eco Store");
-    assertEquals(partnerInfo['sustainability-score'], types.uint(100));
+    assertEquals(partnerInfo['sustainability-score'], types.uint(5));
   }
 });
 
@@ -42,6 +42,7 @@ Clarinet.test({
     const deployer = accounts.get('deployer')!;
     const partner = accounts.get('wallet_1')!;
     const user = accounts.get('wallet_2')!;
+    const unauthorized = accounts.get('wallet_3')!;
     
     // Register partner first
     let setup = chain.mineBlock([
@@ -51,6 +52,17 @@ Clarinet.test({
         types.uint(2)
       ], deployer.address)
     ]);
+    
+    // Test unauthorized partner
+    let unauthorizedBlock = chain.mineBlock([
+      Tx.contractCall('bloom_rewards', 'award-points', [
+        types.principal(user.address),
+        types.uint(100),
+        types.principal(partner.address)
+      ], unauthorized.address)
+    ]);
+    
+    assertEquals(unauthorizedBlock.receipts[0].result.expectErr(), 104);
     
     // Award points
     let awardBlock = chain.mineBlock([

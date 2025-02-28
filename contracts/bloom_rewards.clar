@@ -7,6 +7,8 @@
 (define-constant err-not-partner (err u101))
 (define-constant err-insufficient-balance (err u102))
 (define-constant err-invalid-points (err u103))
+(define-constant err-unauthorized (err u104))
+(define-constant max-sustainability-score u10)
 
 ;; Data Variables
 (define-data-var token-name (string-ascii 32) "Bloom Token")
@@ -31,7 +33,7 @@
 
 ;; Partner Management
 (define-public (register-partner (partner-address principal) (partner-name (string-ascii 64)) (initial-score uint))
-  (if (is-eq tx-sender contract-owner)
+  (if (and (is-eq tx-sender contract-owner) (<= initial-score max-sustainability-score))
     (begin
       (map-set partners partner-address {
         name: partner-name,
@@ -44,27 +46,44 @@
   )
 )
 
+(define-public (deactivate-partner (partner-address principal))
+  (if (is-eq tx-sender contract-owner)
+    (let ((partner-data (unwrap! (map-get? partners partner-address) err-not-partner)))
+      (map-set partners partner-address (merge partner-data { active: false }))
+      (ok true)
+    )
+    err-owner-only
+  )
+)
+
 ;; Reward Distribution
 (define-public (award-points (user principal) (amount uint) (partner principal))
   (let (
     (partner-data (unwrap! (map-get? partners partner) err-not-partner))
-    (points-to-award (* amount (get sustainability-score partner-data)))
   )
-    (if (get active partner-data)
-      (begin
+    (if (and 
+        (is-eq tx-sender partner)
+        (get active partner-data)
+        (> amount u0)
+      )
+      (let (
+        (points-to-award (* amount (get sustainability-score partner-data)))
+        (current-stats (default-to { total-points: u0, purchases: u0, redemptions: u0 } (map-get? user-stats user)))
+      )
         (try! (ft-mint? bloom-token points-to-award user))
         (map-set user-stats user 
-          (merge (default-to 
-            { total-points: u0, purchases: u0, redemptions: u0 } 
-            (map-get? user-stats user))
+          (merge current-stats
             { 
-              total-points: (+ points-to-award (default-to u0 (get total-points (map-get? user-stats user)))),
-              purchases: (+ u1 (default-to u0 (get purchases (map-get? user-stats user))))
+              total-points: (+ points-to-award (get total-points current-stats)),
+              purchases: (+ u1 (get purchases current-stats))
             }
           ))
         (ok points-to-award)
       )
-      err-not-partner
+      (if (not (is-eq tx-sender partner))
+        err-unauthorized
+        err-not-partner
+      )
     )
   )
 )
@@ -74,16 +93,16 @@
   (let (
     (current-balance (ft-get-balance bloom-token user))
   )
-    (if (>= current-balance amount)
+    (if (and (>= current-balance amount) (> amount u0))
       (begin
         (try! (ft-burn? bloom-token amount user))
-        (map-set user-stats user 
-          (merge (default-to 
-            { total-points: u0, purchases: u0, redemptions: u0 } 
-            (map-get? user-stats user))
-            { redemptions: (+ u1 (default-to u0 (get redemptions (map-get? user-stats user)))) }
-          ))
-        (ok true)
+        (let ((current-stats (default-to { total-points: u0, purchases: u0, redemptions: u0 } (map-get? user-stats user))))
+          (map-set user-stats user 
+            (merge current-stats
+              { redemptions: (+ u1 (get redemptions current-stats)) }
+            ))
+          (ok true)
+        )
       )
       err-insufficient-balance
     )
